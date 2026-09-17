@@ -1,51 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLeague } from '../context/LeagueContext.jsx'
+import { formatPoint as fmtPoint, legFromLine, summariseBoard } from '../lib/board.js'
 import { formatAmerican } from '../lib/odds.js'
 import { currentNflWeek, defaultLockAt, formatDateTime, MAX_WEEK, weekLabel } from '../lib/week.js'
-
-// Turns raw bookmaker rows into one line per outcome: the most common
-// point (spread / total) across books, with the best price at that point.
-function summarise(games, oddsRows) {
-  const byGame = new Map()
-  for (const row of oddsRows) {
-    if (!byGame.has(row.game_id)) byGame.set(row.game_id, [])
-    byGame.get(row.game_id).push(row)
-  }
-  return games.map((g) => {
-    const rows = byGame.get(g.id) || []
-    const markets = {}
-    for (const market of ['h2h', 'spreads', 'totals']) {
-      const mrows = rows.filter((r) => r.market === market)
-      const outcomes = [...new Set(mrows.map((r) => r.outcome))]
-      markets[market] = outcomes.map((outcome) => {
-        const orows = mrows.filter((r) => r.outcome === outcome)
-        let point = null
-        if (market !== 'h2h') {
-          const counts = new Map()
-          for (const r of orows) counts.set(r.point, (counts.get(r.point) || 0) + 1)
-          point = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
-        }
-        const atPoint = market === 'h2h' ? orows : orows.filter((r) => Number(r.point) === Number(point))
-        const best = atPoint.reduce((acc, r) => (acc === null || r.price > acc.price ? r : acc), null)
-        return { outcome, point, price: best?.price ?? null, bookmaker: best?.bookmaker, books: atPoint.length }
-      })
-    }
-    // Order team outcomes away then home.
-    for (const m of ['h2h', 'spreads']) {
-      markets[m].sort((a, b) => (a.outcome === g.away_team ? -1 : b.outcome === g.away_team ? 1 : 0))
-    }
-    markets.totals.sort((a, b) => (a.outcome === 'Over' ? -1 : b.outcome === 'Over' ? 1 : 0))
-    return { game: g, markets, fetchedAt: rows[0]?.fetched_at }
-  })
-}
-
-function fmtPoint(p, market) {
-  if (p === null || p === undefined) return ''
-  const n = Number(p)
-  if (market === 'spreads') return n > 0 ? `+${n}` : `${n}`
-  return `${n}`
-}
 
 export default function OddsBoard() {
   const { settings, games, weeks, findWeek, createWeek, loadOddsForWeek } = useLeague()
@@ -73,17 +31,11 @@ export default function OddsBoard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [season, weekNum, games])
 
-  const board = useMemo(() => summarise(weekGames, oddsRows), [weekGames, oddsRows])
+  const board = useMemo(() => summariseBoard(weekGames, oddsRows), [weekGames, oddsRows])
   const lastFetched = board.map((b) => b.fetchedAt).filter(Boolean).sort().at(-1)
 
   function choose(g, market, line) {
-    const gameName = `${g.away_team} @ ${g.home_team}`
-    let pick, type
-    if (market === 'h2h') { pick = `${line.outcome} ML`; type = 'moneyline' }
-    else if (market === 'spreads') { pick = `${line.outcome} ${fmtPoint(line.point, market)}`; type = 'spread' }
-    else { pick = `${line.outcome} ${fmtPoint(line.point, market)}`; type = 'total' }
-    const prefill = { game: gameName, market: type, pick, odds: line.price, game_id: g.id }
-    navigate(`/weeks/${season}/${weekNum}`, { state: { prefill } })
+    navigate(`/weeks/${season}/${weekNum}`, { state: { prefill: legFromLine(g, market, line) } })
   }
 
   async function ensureWeek() {

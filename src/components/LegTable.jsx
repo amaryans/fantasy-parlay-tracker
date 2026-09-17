@@ -1,23 +1,26 @@
 import { useState } from 'react'
 import { useLeague } from '../context/LeagueContext.jsx'
-import { parseAmerican } from '../lib/odds.js'
+import { formatAmerican, parseAmerican } from '../lib/odds.js'
 import { isLocked } from '../lib/week.js'
 import { Odds, ResultBadge, ResultSelect } from './Badges.jsx'
 import LegForm from './LegForm.jsx'
 
 const MARKET_LABEL = { spread: 'Spread', moneyline: 'ML', total: 'Total', prop: 'Prop', other: 'Other' }
 
-// Every member gets a row, so it is obvious who still owes a pick.
+// Every eligible member gets a row, so it is obvious who still owes a pick.
+// Anyone can fill in odds and mark results; only the owner (or a
+// commissioner) can write, rewrite or remove a pick.
 export default function LegTable({ week, editable = true }) {
-  const { me, profiles, settings, legsForWeek, updateLeg, deleteLeg } = useLeague()
+  const { me, profiles, settings, isCommissioner, legsForWeek, updateLeg, deleteLeg, refreshLegOdds } = useLeague()
   const [editing, setEditing] = useState(null)   // leg id being edited
   const [addingFor, setAddingFor] = useState(null) // user id
   const [busy, setBusy] = useState(null)
-  const [error, setError] = useState(null)
+  const [note, setNote] = useState(null)
 
   const legs = legsForWeek(week.id)
   const locked = isLocked(week)
   const legByUser = new Map(legs.map((l) => [l.user_id, l]))
+  const canManage = (userId) => isCommissioner || userId === me.id
 
   const rows = profiles
     .filter((p) => settings?.loser_adds_leg || p.id !== week.loser_id)
@@ -30,20 +33,32 @@ export default function LegTable({ week, editable = true }) {
 
   async function act(id, fn) {
     setBusy(id)
-    setError(null)
-    try { await fn() } catch (err) { setError(err.message) } finally { setBusy(null) }
+    setNote(null)
+    try { await fn() } catch (err) { setNote({ ok: false, text: err.message }) } finally { setBusy(null) }
   }
 
   async function setOdds(leg, raw) {
     const parsed = parseAmerican(raw)
-    if (Number.isNaN(parsed)) { setError('Odds should look like -110 or +150.'); return }
+    if (Number.isNaN(parsed)) { setNote({ ok: false, text: 'Odds should look like -110 or +150.' }); return }
     if (parsed === leg.odds) return
     await act(leg.id, () => updateLeg(leg.id, { odds: parsed }))
   }
 
+  async function refresh(leg) {
+    await act(leg.id, async () => {
+      const line = await refreshLegOdds(leg)
+      setNote({
+        ok: true,
+        text: line.price === leg.odds
+          ? `${leg.pick} is still ${formatAmerican(line.price)} (best of ${line.books} book${line.books === 1 ? '' : 's'}).`
+          : `${leg.pick} updated from ${formatAmerican(leg.odds)} to ${formatAmerican(line.price)} (${line.bookmaker}).`,
+      })
+    })
+  }
+
   return (
     <div className="stack">
-      {error && <div className="banner error">{error}</div>}
+      {note && <div className={`banner ${note.ok ? 'success' : 'error'} small`}>{note.text}</div>}
       <div className="table-wrap">
         <table className="legs-table">
           <thead>
@@ -61,6 +76,7 @@ export default function LegTable({ week, editable = true }) {
                 <td className="nowrap member">
                   {profile.display_name}
                   {profile.id === me.id && <span className="muted small"> (you)</span>}
+                  {profile.id === week.loser_id && <span className="badge" style={{ marginLeft: '.4rem' }}>placing</span>}
                 </td>
                 <td className="pick">
                   {leg ? (
@@ -68,6 +84,7 @@ export default function LegTable({ week, editable = true }) {
                       <div>{leg.pick}</div>
                       <div className="muted small">
                         {leg.game ? `${leg.game} · ` : ''}{MARKET_LABEL[leg.market]}
+                        {leg.entered_by && leg.entered_by !== leg.user_id && ' · entered by commissioner'}
                       </div>
                     </>
                   ) : (
@@ -76,16 +93,29 @@ export default function LegTable({ week, editable = true }) {
                 </td>
                 <td className="num odds-cell">
                   {leg && editable && !locked ? (
-                    <input
-                      aria-label={`Odds for ${profile.display_name}`}
-                      key={leg.odds ?? 'blank'}
-                      defaultValue={leg.odds ?? ''}
-                      placeholder="—"
-                      inputMode="numeric"
-                      style={{ width: '5.5rem', textAlign: 'right' }}
-                      onBlur={(e) => setOdds(leg, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
-                    />
+                    <span className="row" style={{ justifyContent: 'flex-end', gap: '.25rem', flexWrap: 'nowrap' }}>
+                      <input
+                        aria-label={`Odds for ${profile.display_name}`}
+                        key={leg.odds ?? 'blank'}
+                        defaultValue={leg.odds ?? ''}
+                        placeholder="—"
+                        inputMode="numeric"
+                        style={{ width: '5.5rem', textAlign: 'right' }}
+                        onBlur={(e) => setOdds(leg, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
+                      />
+                      {leg.game_id && leg.odds_ref && (
+                        <button
+                          className="small"
+                          title="Refresh this line from the odds board"
+                          aria-label={`Refresh line for ${profile.display_name}`}
+                          disabled={busy === leg.id}
+                          onClick={() => refresh(leg)}
+                        >
+                          ↻
+                        </button>
+                      )}
+                    </span>
                   ) : leg ? <Odds value={leg.odds} /> : '—'}
                 </td>
                 <td className="result-cell">
@@ -100,7 +130,7 @@ export default function LegTable({ week, editable = true }) {
                 </td>
                 {editable && (
                   <td className="nowrap right actions">
-                    {leg && !locked && (
+                    {leg && !locked && canManage(leg.user_id) && (
                       <>
                         <button className="small" onClick={() => setEditing(editing === leg.id ? null : leg.id)}>Edit</button>
                         <button
@@ -112,7 +142,7 @@ export default function LegTable({ week, editable = true }) {
                         </button>
                       </>
                     )}
-                    {!leg && !locked && (
+                    {!leg && !locked && canManage(profile.id) && (
                       <button className="small primary" onClick={() => setAddingFor(addingFor === profile.id ? null : profile.id)}>
                         {profile.id === me.id ? 'Add my leg' : 'Enter for them'}
                       </button>

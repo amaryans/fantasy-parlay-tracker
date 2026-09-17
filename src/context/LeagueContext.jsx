@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { bestLine } from '../lib/board.js'
+import { loadSleeperLeague, lowestScorer } from '../lib/sleeper.js'
 import { useAuth } from './AuthContext.jsx'
 
 const LeagueContext = createContext(null)
@@ -43,6 +45,31 @@ export function LeagueProvider({ children }) {
   }, [user, reload])
 
   const me = useMemo(() => state.profiles.find((p) => p.id === user?.id) ?? null, [state.profiles, user])
+  const isCommissioner = Boolean(me?.is_commissioner)
+
+  // ---- Sleeper -----------------------------------------------------------
+  // Loaded once per league id; `sleeper.error` is set when the league id is
+  // wrong or Sleeper is unreachable, and the app falls back to manual mode.
+  const sleeperLeagueId = state.settings?.sleeper_league_id || null
+  const [sleeper, setSleeper] = useState({ loading: false, error: null, league: null })
+  useEffect(() => {
+    if (!sleeperLeagueId) { setSleeper({ loading: false, error: null, league: null }); return }
+    let active = true
+    setSleeper({ loading: true, error: null, league: null })
+    loadSleeperLeague(sleeperLeagueId)
+      .then((league) => { if (active) setSleeper({ loading: false, error: null, league }) })
+      .catch((err) => { if (active) setSleeper({ loading: false, error: err.message, league: null }) })
+    return () => { active = false }
+  }, [sleeperLeagueId])
+
+  // Lowest scorer for a fantasy week, mapped to an app member when possible.
+  const sleeperLowestScorer = useCallback(async (fantasyWeek) => {
+    if (!sleeper.league) return null
+    const low = await lowestScorer(sleeper.league.leagueId, fantasyWeek, sleeper.league.teams)
+    if (!low) return null
+    const profile = state.profiles.find((p) => p.sleeper_user_id === low.userId) ?? null
+    return { ...low, profile }
+  }, [sleeper.league, state.profiles])
 
   const profileById = useCallback((id) => state.profiles.find((p) => p.id === id) ?? null, [state.profiles])
   const nameOf = useCallback((id) => profileById(id)?.display_name ?? 'Unknown', [profileById])
@@ -77,6 +104,20 @@ export function LeagueProvider({ children }) {
     deleteLeg: (id) => run(supabase.from('legs').delete().eq('id', id)),
     updateSettings: (fields) => run(supabase.from('league_settings').update(fields).eq('id', 1).select().single()),
     updateProfile: (fields) => run(supabase.from('profiles').update(fields).eq('id', user.id).select().single()),
+    // Commissioner only (RLS enforces it): edit any member's profile.
+    updateMember: (id, fields) => run(supabase.from('profiles').update(fields).eq('id', id).select().single()),
+  }
+
+  // Re-price a leg that came from the odds board against the latest lines.
+  async function refreshLegOdds(leg) {
+    if (!leg.game_id || !leg.odds_ref) throw new Error('This leg was typed in by hand, so there is no line to refresh.')
+    const { data, error } = await supabase.from('game_odds').select('*').eq('game_id', leg.game_id)
+    if (error) throw error
+    const { market, outcome, point } = leg.odds_ref
+    const line = bestLine(data, market, outcome, market === 'h2h' ? undefined : point)
+    if (line.price === null) throw new Error('No book is offering that exact line any more. Update the odds by hand.')
+    if (line.price !== leg.odds) await api.updateLeg(leg.id, { odds: line.price })
+    return line
   }
 
   // Odds rows can exceed Supabase's 1000-row page, so page through them.
@@ -100,7 +141,8 @@ export function LeagueProvider({ children }) {
   }
 
   const value = {
-    ...state, me, reload, profileById, nameOf, legsForWeek, findWeek, loadOddsForWeek, ...api,
+    ...state, me, isCommissioner, sleeper, sleeperLowestScorer, refreshLegOdds,
+    reload, profileById, nameOf, legsForWeek, findWeek, loadOddsForWeek, ...api,
   }
   return <LeagueContext.Provider value={value}>{children}</LeagueContext.Provider>
 }

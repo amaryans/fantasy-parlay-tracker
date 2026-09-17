@@ -3,20 +3,20 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { supabase } from '../lib/supabase.js'
 
-export function useLeagueName() {
-  const [name, setName] = useState('Loser Parlay Tracker')
+export function useLeagueInfo() {
+  const [info, setInfo] = useState({ league_name: 'Loser Parlay Tracker', sleeper_league_id: null })
   useEffect(() => {
     supabase.rpc('public_league_info').then(({ data }) => {
-      if (data?.[0]?.league_name) setName(data[0].league_name)
+      if (data?.[0]?.league_name) setInfo(data[0])
     })
   }, [])
-  return name
+  return info
 }
 
 export default function Login() {
   const { signIn } = useAuth()
   const navigate = useNavigate()
-  const leagueName = useLeagueName()
+  const { league_name: leagueName } = useLeagueInfo()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)

@@ -1,18 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
-import { useLeagueName } from './Login.jsx'
+import { loadSleeperLeague } from '../lib/sleeper.js'
+import { useLeagueInfo } from './Login.jsx'
 
 export default function Signup() {
   const { signUp } = useAuth()
   const navigate = useNavigate()
-  const leagueName = useLeagueName()
-  const [form, setForm] = useState({ email: '', password: '', displayName: '', teamName: '', inviteCode: '' })
+  const info = useLeagueInfo()
+  const [form, setForm] = useState({ email: '', password: '', displayName: '', teamName: '', inviteCode: '', sleeperUserId: '' })
+  const [teams, setTeams] = useState([])
   const [error, setError] = useState(null)
   const [done, setDone] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  // If the league is linked to Sleeper, offer its teams so the new member
+  // can pick themselves (and we can prefill their names).
+  useEffect(() => {
+    if (!info.sleeper_league_id) return
+    let active = true
+    loadSleeperLeague(info.sleeper_league_id)
+      .then((league) => { if (active) setTeams(league.teams) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [info.sleeper_league_id])
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  function chooseTeam(e) {
+    const id = e.target.value
+    const t = teams.find((x) => x.userId === id)
+    setForm((f) => ({
+      ...f,
+      sleeperUserId: id,
+      displayName: f.displayName || t?.displayName || '',
+      teamName: f.teamName || t?.teamName || '',
+    }))
+  }
 
   async function submit(e) {
     e.preventDefault()
@@ -25,6 +49,7 @@ export default function Signup() {
         displayName: form.displayName.trim(),
         teamName: form.teamName.trim(),
         inviteCode: form.inviteCode.trim(),
+        sleeperUserId: form.sleeperUserId || null,
       })
       if (needsConfirmation) setDone(true)
       else navigate('/')
@@ -50,13 +75,24 @@ export default function Signup() {
     <div className="auth-shell">
       <form className="card auth-card stack" onSubmit={submit}>
         <div>
-          <h1>Join {leagueName}</h1>
+          <h1>Join {info.league_name}</h1>
           <p className="muted">You need the league invite code from the commissioner.</p>
         </div>
         <div className="field">
           <label htmlFor="f-invite-code">Invite code</label>
           <input id="f-invite-code" value={form.inviteCode} onChange={set('inviteCode')} required autoCapitalize="off" />
         </div>
+        {teams.length > 0 && (
+          <div className="field">
+            <label htmlFor="f-which-sleeper-team-are-you">Which Sleeper team are you?</label>
+            <select id="f-which-sleeper-team-are-you" value={form.sleeperUserId} onChange={chooseTeam}>
+              <option value="">Pick your team</option>
+              {teams.map((t) => (
+                <option key={t.userId} value={t.userId}>{t.displayName}{t.teamName ? ` · ${t.teamName}` : ''}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="field">
           <label htmlFor="f-your-name-shown-to-the-league">Your name (shown to the league)</label>
           <input id="f-your-name-shown-to-the-league" value={form.displayName} onChange={set('displayName')} required />

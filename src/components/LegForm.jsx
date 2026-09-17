@@ -15,7 +15,7 @@ const MARKETS = [
 // Add or edit one leg. `leg` is an existing row when editing; `prefill`
 // comes from the odds board; `forUserId` picks who the leg belongs to.
 export default function LegForm({ week, leg = null, prefill = null, forUserId = null, allowMemberChoice = false, onDone }) {
-  const { me, profiles, legsForWeek, settings, upsertLeg, updateLeg } = useLeague()
+  const { me, profiles, legsForWeek, settings, isCommissioner, upsertLeg, updateLeg } = useLeague()
   const existingLegs = legsForWeek(week.id)
   const uid = useId()
 
@@ -24,7 +24,9 @@ export default function LegForm({ week, leg = null, prefill = null, forUserId = 
   const [market, setMarket] = useState(leg?.market ?? prefill?.market ?? 'spread')
   const [pick, setPick] = useState(leg?.pick ?? prefill?.pick ?? '')
   const [odds, setOdds] = useState(leg?.odds ?? prefill?.odds ?? '')
-  const [gameId] = useState(leg?.game_id ?? prefill?.game_id ?? null)
+  // A leg picked from the odds board stays linked to its game/line so the
+  // odds can be refreshed; editing the pick text by hand unlinks it.
+  const [link, setLink] = useState({ game_id: leg?.game_id ?? prefill?.game_id ?? null, odds_ref: leg?.odds_ref ?? prefill?.odds_ref ?? null })
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -34,8 +36,10 @@ export default function LegForm({ week, leg = null, prefill = null, forUserId = 
       setMarket(prefill.market ?? 'spread')
       setPick(prefill.pick ?? '')
       setOdds(prefill.odds ?? '')
+      setLink({ game_id: prefill.game_id ?? null, odds_ref: prefill.odds_ref ?? null })
     }
   }, [prefill])
+  const unlink = () => setLink({ game_id: null, odds_ref: null })
 
   const excluded = existingLegs.filter((l) => l.id !== leg?.id).map((l) => l.user_id)
   if (!settings?.loser_adds_leg && week.loser_id) excluded.push(week.loser_id)
@@ -54,7 +58,7 @@ export default function LegForm({ week, leg = null, prefill = null, forUserId = 
     }
     setSaving(true)
     try {
-      const fields = { game: game.trim() || null, market, pick: pick.trim(), odds: parsed, game_id: gameId }
+      const fields = { game: game.trim() || null, market, pick: pick.trim(), odds: parsed, game_id: link.game_id, odds_ref: link.odds_ref }
       if (leg) await updateLeg(leg.id, fields)
       else await upsertLeg({ ...fields, week_id: week.id, user_id: userId })
       onDone?.()
@@ -67,7 +71,7 @@ export default function LegForm({ week, leg = null, prefill = null, forUserId = 
 
   return (
     <form onSubmit={submit} className="stack">
-      {(allowMemberChoice || (!leg && userId !== me.id)) && (
+      {isCommissioner && (allowMemberChoice || (!leg && userId !== me.id)) && (
         <div className="field">
           <label htmlFor={`${uid}-whose-leg`}>Whose leg</label>
           <MemberSelect id={`${uid}-whose-leg`} value={userId} onChange={setUserId} profiles={profiles} exclude={excluded} disabled={Boolean(leg)} />
@@ -76,17 +80,17 @@ export default function LegForm({ week, leg = null, prefill = null, forUserId = 
       <div className="form-grid">
         <div className="field">
           <label htmlFor={`${uid}-game`}>Game</label>
-          <input id={`${uid}-game`} value={game} onChange={(e) => setGame(e.target.value)} placeholder="Chiefs @ Ravens" />
+          <input id={`${uid}-game`} value={game} onChange={(e) => { setGame(e.target.value); unlink() }} placeholder="Chiefs @ Ravens" />
         </div>
         <div className="field">
           <label htmlFor={`${uid}-type`}>Type</label>
-          <select id={`${uid}-type`} value={market} onChange={(e) => setMarket(e.target.value)}>
+          <select id={`${uid}-type`} value={market} onChange={(e) => { setMarket(e.target.value); unlink() }}>
             {MARKETS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </div>
         <div className="field">
           <label htmlFor={`${uid}-pick`}>Pick</label>
-          <input id={`${uid}-pick`} value={pick} onChange={(e) => setPick(e.target.value)} placeholder="Ravens -3.5" required />
+          <input id={`${uid}-pick`} value={pick} onChange={(e) => { setPick(e.target.value); unlink() }} placeholder="Ravens -3.5" required />
         </div>
         <div className="field">
           <label htmlFor={`${uid}-odds-american`}>Odds (American)</label>

@@ -29,7 +29,7 @@ export function AuthProvider({ children }) {
     if (error) throw error
   }
 
-  async function signUp({ email, password, displayName, teamName, inviteCode }) {
+  async function signUp({ email, password, displayName, teamName, inviteCode, sleeperUserId }) {
     const { data: ok, error: codeError } = await supabase.rpc('check_invite_code', { code: inviteCode })
     if (codeError) throw codeError
     if (!ok) throw new Error('That invite code is not right. Ask whoever set up the league.')
@@ -38,7 +38,7 @@ export function AuthProvider({ children }) {
       email,
       password,
       options: {
-        data: { display_name: displayName, team_name: teamName, invite_code: inviteCode },
+        data: { display_name: displayName, team_name: teamName, invite_code: inviteCode, sleeper_user_id: sleeperUserId || null },
       },
     })
     if (error) throw error
