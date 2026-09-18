@@ -1,10 +1,10 @@
 # Loser Parlay Tracker
 
-> **Part of the consolidated league site.** The login structure in this app (invite code,
-> profiles, commissioner role, claiming a Sleeper team) is now the login for
-> [west-ktown-stats](https://github.com/amaryans/west-ktown-stats), the league's main site.
-> Its `supabase/schema.sql` is a superset of the one here, so both apps can run on the same
-> Supabase project with one set of accounts. The parlay pages themselves still live in this repo.
+> **Merged into the league site.** The parlay tracker now lives under the Parlay tab of
+> [west-ktown-stats](https://github.com/amaryans/west-ktown-stats) (`src/features/parlay`),
+> sharing that site's login, member list and Sleeper link. The database schema there is a
+> superset of `supabase/schema.sql` here, so an existing parlay project keeps working. This
+> repo is kept as the standalone version.
 
 A small web app for the West K-Town Fantasy Football League's weekly loser parlay.
 
