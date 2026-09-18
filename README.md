@@ -1,5 +1,11 @@
 # Loser Parlay Tracker
 
+> **Part of the consolidated league site.** The login structure in this app (invite code,
+> profiles, commissioner role, claiming a Sleeper team) is now the login for
+> [west-ktown-stats](https://github.com/amaryans/west-ktown-stats), the league's main site.
+> Its `supabase/schema.sql` is a superset of the one here, so both apps can run on the same
+> Supabase project with one set of accounts. The parlay pages themselves still live in this repo.
+
 A small web app for the West K-Town Fantasy Football League's weekly loser parlay.
 
 **The rule:** whoever scores the fewest fantasy points in a week has to place a parlay on the
